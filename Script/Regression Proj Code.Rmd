@@ -1,0 +1,66 @@
+---
+title: "Regression Project Code"
+author: "Jill Reiner"
+date: "6/19/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+```
+
+```{r}
+cfb <- read.csv("http://www.stat.cmu.edu/cmsac/sure/materials/data/regression_projects/cfb_2019_games.csv")
+
+cfb[is.na(cfb$excitement_index),]
+
+cfb<- cfb[-c(268,625),]
+
+cfb$home_1sthalf <- cfb$home_1_pts + cfb$home_2_pts 
+cfb$home_2ndhalf <- cfb$home_3_pts + cfb$home_4_pts
+
+cfb$away_1sthalf <- cfb$away_1_pts + cfb$away_2_pts
+cfb$away_2ndhalf <- cfb$away_3_pts + cfb$away_4_pts
+
+cfb$margin_1sthalf <- cfb$home_1sthalf - cfb$away_1sthalf
+cfb$margin_game <- cfb$home_points - cfb$away_points
+
+cfb$comeback <- (cfb$margin_game / cfb$margin_1sthalf) < 0
+```
+
+```{r}
+cfb_ei %>%
+  ggplot(aes(x = excitement_index)) +
+  geom_histogram(binwidth = 0.2) +
+  theme_bw()
+```
+
+```{r}
+cfb_ei %>%
+  group_by(conference_game) %>%
+  summarize(avg_ei = mean(excitement_index)) %>%
+  ggplot(aes(x = conference_game, y = avg_ei)) +
+  geom_bar(stat = "identity") +
+  theme_bw()
+```
+
+```{r}
+cfb_ei %>%
+  mutate(totalpoints = away_4_pts + home_4_pts + away_3_pts + home_3_pts + away_2_pts + home_2_pts + away_1_pts + home_1_pts) %>%
+  ggplot(aes(x = excitement_index, y = totalpoints)) +
+  geom_point() +
+  stat_smooth() +
+  theme_bw()
+```
+
+Not very good. Total points could either be a complete blowout (not very exciting) or a close high scoring game (exciting).
+
+```{r}
+lm1 <- lm(data = cfb, excitement_index ~ comeback + margin_1sthalf +
+                                        (conference_game * margin_1sthalf))
+summary(lm1)
+```
+
