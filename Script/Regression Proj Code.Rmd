@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(ggplot2)
 library(tidyverse)
 library(dplyr)
+library(forcats)
 ```
 
 ```{r}
@@ -17,7 +18,7 @@ cfb <- read.csv("http://www.stat.cmu.edu/cmsac/sure/materials/data/regression_pr
 
 cfb[is.na(cfb$excitement_index),]
 
-cfb<- cfb[-c(268,625),]
+cfb <- cfb[-c(268,625),]
 
 cfb$home_1sthalf <- cfb$home_1_pts + cfb$home_2_pts 
 cfb$home_2ndhalf <- cfb$home_3_pts + cfb$home_4_pts
@@ -32,14 +33,14 @@ cfb$comeback <- (cfb$margin_game / cfb$margin_1sthalf) < 0
 ```
 
 ```{r}
-cfb_ei %>%
+cfb %>%
   ggplot(aes(x = excitement_index)) +
   geom_histogram(binwidth = 0.2) +
   theme_bw()
 ```
 
 ```{r}
-cfb_ei %>%
+cfb %>%
   group_by(conference_game) %>%
   summarize(avg_ei = mean(excitement_index)) %>%
   ggplot(aes(x = conference_game, y = avg_ei)) +
@@ -48,7 +49,7 @@ cfb_ei %>%
 ```
 
 ```{r}
-cfb_ei %>%
+cfb %>%
   mutate(totalpoints = away_4_pts + home_4_pts + away_3_pts + home_3_pts + away_2_pts + home_2_pts + away_1_pts + home_1_pts) %>%
   ggplot(aes(x = excitement_index, y = totalpoints)) +
   geom_point() +
@@ -59,8 +60,154 @@ cfb_ei %>%
 Not very good. Total points could either be a complete blowout (not very exciting) or a close high scoring game (exciting).
 
 ```{r}
-lm1 <- lm(data = cfb, excitement_index ~ comeback + margin_1sthalf +
-                                        (conference_game * margin_1sthalf))
+lm1 <- lm(data = cfb, excitement_index ~ score_difference + comeback * margin_1sthalf)
 summary(lm1)
+```
+
+```{r init-cor, echo = TRUE, eval = FALSE}
+library(ggcorrplot)
+cfb_model_data <- cfb %>%
+  dplyr::select(week,
+                home_points, 
+                away_points,
+                excitement_index,
+                home_1_pts,
+                home_2_pts, 
+                home_3_pts,
+                home_4_pts,
+                away_1_pts,
+                away_2_pts, 
+                away_3_pts,
+                away_4_pts,
+                score_difference, 
+                margin_1sthalf,
+                margin_game)
+cfb_cor_matrix <- cor(cfb_model_data) #<<
+ggcorrplot(cfb_cor_matrix) #<<
+```
+
+```{r pretty-cor, echo = TRUE, eval = FALSE}
+round_cor_matrix_full <- 
+  round(cor(cfb_model_data), 2) #<<
+ggcorrplot(round_cor_matrix_full, 
+           hc.order = TRUE,#<<
+           type = "lower")#<<
+```
+
+```{r}
+cfb_model_data_ourvars <- cfb %>%
+  dplyr::select(
+                excitement_index,
+                score_difference, 
+                margin_1sthalf,
+                comeback,
+                margin_game)
+cfb_cor_matrix_ourvars <- cor(cfb_model_data_ourvars) #<<
+ggcorrplot(cfb_cor_matrix_ourvars) #<<
+```
+
+```{r pretty-cor, echo = TRUE, eval = FALSE}
+round_cor_matrix <- 
+  round(cor(cfb_model_data_ourvars), 2) #<<
+ggcorrplot(round_cor_matrix, 
+           hc.order = TRUE,#<<
+           type = "lower",#<<
+           lab = TRUE)#<<
+```
+
+```{r select-preds}
+library(ggdendro)
+cfb_ex_vars <- dplyr::select(cfb_model_data, -excitement_index)
+exp_cor_matrix <- cor(cfb_ex_vars)
+
+cor_dist_matrix <- 1 - abs(exp_cor_matrix)
+cor_dist_matrix <- as.dist(cor_dist_matrix)
+
+cfb_exp_hc <- hclust(cor_dist_matrix, #<<
+                     "complete") 
+ggdendrogram(cfb_exp_hc, #<<
+             rotate = TRUE, #<<
+             size = 2)#<<
+```
+
+```{r}
+library(dendextend)
+cor_dist_matrix %>%
+  hclust() %>%
+  as.dendrogram() %>%
+  set("branches_k_col", 
+      k = 2) %>% 
+  set("labels_cex", .9) %>%
+  ggplot(horiz = TRUE)
+```
+
+Home and away 4th Q points in their own cluster? Interesting development.
+
+```{r pairsplot, eval = FALSE}
+library(GGally) #<<
+ggpairs(cfb_model_data_ourvars, #<<
+        columns =
+          c("excitement_index", "score_difference",
+            "margin_1sthalf", "comeback",
+            "margin_game")) #<<
+```
+
+
+```{r init-folds}
+set.seed(2020)
+cfb_model_data_ourvars <- cfb_model_data_ourvars %>%
+  mutate(test_fold = sample(rep(1:5, length.out = n())))
+```
+
+```{r}
+get_cv_preds <- function(model_formula, data = cfb_model_data_ourvars) {
+  # generate holdout predictions for every row based season
+  map_dfr(unique(data$test_fold), 
+          function(holdout) {
+            # Separate test and training data:
+            test_data <- data %>%
+              filter(test_fold == holdout)
+            train_data <- data %>%
+              filter(test_fold != holdout)
+            
+            # Train model:
+            reg_model <- lm(as.formula(model_formula), data = train_data)
+            
+            # Return tibble of holdout results:
+            tibble(test_preds = predict(reg_model, newdata = test_data),
+                   test_actual = test_data$excitement_index,
+                   test_fold = holdout) 
+          })
+}
+
+```
+
+```{r}
+ourvars_minusmargingames_cv_preds <- get_cv_preds("excitement_index ~ score_difference + margin_1sthalf + comeback")
+ourvars_cv_preds <- get_cv_preds("excitement_index ~ score_difference * margin_1sthalf + comeback + margin_game")
+all_int_cv_preds <- get_cv_preds("excitement_index ~ score_difference * margin_game + margin_1sthalf + comeback")
+margin_only_cv_preds <- get_cv_preds("excitement_index ~ score_difference + margin_1sthalf")
+```
+
+```{r five-fold, eval = FALSE}
+bind_rows(mutate(ourvars_minusmargingames_cv_preds, type = "All minus Margin Games"),
+          mutate(ourvars_cv_preds, type = "All"),
+          mutate(all_int_cv_preds, type = "Some Interactions"),
+          mutate(margin_only_cv_preds, type = "Score Differentials Only")) %>%
+  group_by(type) %>%
+  summarize(rmse = sqrt(mean((test_actual - test_preds)^2))) %>%
+  mutate(type = fct_reorder(type, rmse)) %>%
+  ggplot(aes(x = type, y = rmse)) +
+  geom_point() + coord_flip() + theme_bw()
+```
+
+```{r}
+all_lm <- lm(excitement_index ~ comeback + score_difference * margin_1sthalf, data = cfb_model_data_ourvars)
+summary(all_lm)
+```
+
+```{r}
+all_lm2 <- lm(excitement_index ~ score_difference * margin_game + margin_1sthalf + comeback, data = cfb_model_data_ourvars)
+summary(all_lm2)
 ```
 
