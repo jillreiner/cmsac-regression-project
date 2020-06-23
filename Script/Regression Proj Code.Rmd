@@ -11,6 +11,7 @@ library(ggplot2)
 library(tidyverse)
 library(dplyr)
 library(forcats)
+library(ggcorrplot)
 ```
 
 ```{r}
@@ -30,6 +31,10 @@ cfb$margin_1sthalf <- cfb$home_1sthalf - cfb$away_1sthalf
 cfb$margin_game <- cfb$home_points - cfb$away_points
 
 cfb$comeback <- (cfb$margin_game / cfb$margin_1sthalf) < 0
+
+cfb$overtime <- !((cfb$home_1_pts + cfb$home_2_pts + cfb$home_3_pts + cfb$home_4_pts) == cfb$home_points |
+                    (cfb$away_1_pts + cfb$away_2_pts + cfb$away_3_pts + cfb$away_4_pts) == cfb$away_points)
+
 ```
 
 ```{r}
@@ -60,12 +65,24 @@ cfb %>%
 Not very good. Total points could either be a complete blowout (not very exciting) or a close high scoring game (exciting).
 
 ```{r}
-lm1 <- lm(data = cfb, excitement_index ~ score_difference + comeback * margin_1sthalf)
+cfb_conference <- cfb %>%
+  filter(home_conference %in% c("ACC", "Big Ten", "Big 12", "Pac-12", "SEC")) %>%
+  group_by(home_conference) %>%
+  summarize(avg_ei = mean(excitement_index)) %>%
+  ggplot(aes(x = home_conference)) +
+  geom_bar(aes(y = avg_ei),
+           stat = "identity") +
+  theme_bw() +
+  labs(x = "Conference", y = "Average Excitement Index per Game")
+  cfb_conference
+```
+
+```{r}
+lm1 <- lm(data = cfb, excitement_index ~ score_difference + comeback * margin_1sthalf + conference_game)
 summary(lm1)
 ```
 
 ```{r init-cor, echo = TRUE, eval = FALSE}
-library(ggcorrplot)
 cfb_model_data <- cfb %>%
   dplyr::select(week,
                 home_points, 
@@ -207,7 +224,21 @@ summary(all_lm)
 ```
 
 ```{r}
-all_lm2 <- lm(excitement_index ~ score_difference * margin_game + margin_1sthalf + comeback, data = cfb_model_data_ourvars)
+all_lm2 <- lm(excitement_index ~ comeback + score_difference * margin_1sthalf, data = cfb)
 summary(all_lm2)
 ```
+
+```{r first-line-plot, eval = FALSE}
+cfb %>%
+  ggplot(aes(x = score_difference, y = excitement_index, color = comeback, shape = overtime, size = overtime)) + #maybe too much going on here
+  geom_point() +
+  #facet_wrap(~ week)
+  theme_bw() 
+```
+
+Games that were comebacks/went to overtime/were a close game in terms of points were generally more exciting.
+
+Model diagnostics:
+
+
 
