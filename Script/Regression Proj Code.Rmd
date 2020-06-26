@@ -40,7 +40,7 @@ cfb$overtime <- !((cfb$home_1_pts + cfb$home_2_pts + cfb$home_3_pts + cfb$home_4
 ```{r}
 cfb %>%
   ggplot(aes(x = excitement_index)) +
-  geom_histogram(binwidth = 0.2) +
+  geom_histogram(binwidth = .9) +
   theme_bw()
 ```
 
@@ -78,49 +78,52 @@ cfb_conference <- cfb %>%
 ```
 
 ```{r}
+mean(cfb$excitement_index)
+```
+
+```{r}
+cfb_conference3 <- cfb %>%
+  filter(home_conference %in% c("ACC", "Big Ten", "Big 12", "Pac-12", "SEC") |
+           away_conference %in% c("ACC", "Big Ten", "Big 12", "Pac-12", "SEC")) %>%
+  filter(conference_game == TRUE)
+summary(cfb_conference3)
+```
+
+```{r}
+cfb_con <- cfb_conference3 %>%
+  ggplot(aes(x = excitement_index,
+             y = home_conference)) +
+  geom_density_ridges(jittered_points = TRUE, position = position_points_jitter(width = 0.05, height = 0), point_shape = '|', point_size = 3, point_alpha = 1, alpha = 0.7,
+                      quantile_lines = TRUE,
+                      quantile_fun=function(x,...)mean(x)) +
+  geom_vline(xintercept = mean(cfb_conference3$excitement_index), color = "blue") +
+  labs(x = "Excitement Index", y = "Conference",
+       title = "Pac-12, Big 12, and the ACC had the most exciting games in 2019") +
+  theme_bw() 
+cfb_con
+ggsave("con_dist.jpeg", width = 8, height = 6)
+```
+
+```{r}
 lm1 <- lm(data = cfb, excitement_index ~ score_difference + comeback * margin_1sthalf + conference_game)
 summary(lm1)
-```
-
-```{r init-cor, echo = TRUE, eval = FALSE}
-cfb_model_data <- cfb %>%
-  dplyr::select(week,
-                home_points, 
-                away_points,
-                excitement_index,
-                home_1_pts,
-                home_2_pts, 
-                home_3_pts,
-                home_4_pts,
-                away_1_pts,
-                away_2_pts, 
-                away_3_pts,
-                away_4_pts,
-                score_difference, 
-                margin_1sthalf,
-                margin_game)
-cfb_cor_matrix <- cor(cfb_model_data) #<<
-ggcorrplot(cfb_cor_matrix) #<<
-```
-
-```{r pretty-cor, echo = TRUE, eval = FALSE}
-round_cor_matrix_full <- 
-  round(cor(cfb_model_data), 2) #<<
-ggcorrplot(round_cor_matrix_full, 
-           hc.order = TRUE,#<<
-           type = "lower")#<<
 ```
 
 ```{r}
 cfb_model_data_ourvars <- cfb %>%
   dplyr::select(
-                excitement_index,
-                score_difference, 
+                score_difference,
+                home_1sthalf,
                 margin_1sthalf,
                 comeback,
-                margin_game)
-cfb_cor_matrix_ourvars <- cor(cfb_model_data_ourvars) #<<
-ggcorrplot(cfb_cor_matrix_ourvars) #<<
+                overtime,
+                excitement_index)
+cfb_cor_matrix_ourvars <- cor(cfb_model_data_ourvars)
+
+ggcorrplot(cfb_cor_matrix_ourvars, 
+           type = "lower",
+           lab = TRUE)
+ggsave("corr_plot.jpeg", width = 7, height = 6)
 ```
 
 ```{r pretty-cor, echo = TRUE, eval = FALSE}
@@ -133,51 +136,51 @@ ggcorrplot(round_cor_matrix,
 ```
 
 ```{r select-preds}
-library(ggdendro)
-cfb_ex_vars <- dplyr::select(cfb_model_data, -excitement_index)
-exp_cor_matrix <- cor(cfb_ex_vars)
+#library(ggdendro)
+#cfb_ex_vars <- dplyr::select(cfb_model_data, -excitement_index)
+#exp_cor_matrix <- cor(cfb_ex_vars)
 
-cor_dist_matrix <- 1 - abs(exp_cor_matrix)
-cor_dist_matrix <- as.dist(cor_dist_matrix)
+#cor_dist_matrix <- 1 - abs(exp_cor_matrix)
+#cor_dist_matrix <- as.dist(cor_dist_matrix)
 
-cfb_exp_hc <- hclust(cor_dist_matrix, #<<
-                     "complete") 
-ggdendrogram(cfb_exp_hc, #<<
-             rotate = TRUE, #<<
-             size = 2)#<<
+#cfb_exp_hc <- hclust(cor_dist_matrix, #<<
+                     #"complete") 
+#ggdendrogram(cfb_exp_hc, #<<
+             #rotate = TRUE, #<<
+             #size = 2)#<<
 ```
 
 ```{r}
-library(dendextend)
-cor_dist_matrix %>%
-  hclust() %>%
-  as.dendrogram() %>%
-  set("branches_k_col", 
-      k = 2) %>% 
-  set("labels_cex", .9) %>%
-  ggplot(horiz = TRUE)
+#library(dendextend)
+#cor_dist_matrix %>%
+ #hclust() %>%
+  #as.dendrogram() %>%
+  #set("branches_k_col", 
+      #k = 2) %>% 
+  #set("labels_cex", .9) %>%
+  #ggplot(horiz = TRUE)
 ```
 
 Home and away 4th Q points in their own cluster? Interesting development.
 
 ```{r pairsplot, eval = FALSE}
 library(GGally) #<<
-ggpairs(cfb_model_data_ourvars, #<<
+ggpairs(cfb, #<<
         columns =
           c("excitement_index", "score_difference",
             "margin_1sthalf", "comeback",
-            "margin_game")) #<<
+            "margin_game", "overtime")) #<<
 ```
 
 
 ```{r init-folds}
 set.seed(2020)
-cfb_model_data_ourvars <- cfb_model_data_ourvars %>%
+cfb <- cfb %>%
   mutate(test_fold = sample(rep(1:5, length.out = n())))
 ```
 
 ```{r}
-get_cv_preds <- function(model_formula, data = cfb_model_data_ourvars) {
+get_cv_preds <- function(model_formula, data = cfb) {
   # generate holdout predictions for every row based season
   map_dfr(unique(data$test_fold), 
           function(holdout) {
@@ -201,8 +204,8 @@ get_cv_preds <- function(model_formula, data = cfb_model_data_ourvars) {
 
 ```{r}
 ourvars_minusmargingames_cv_preds <- get_cv_preds("excitement_index ~ score_difference + margin_1sthalf + comeback")
-ourvars_cv_preds <- get_cv_preds("excitement_index ~ score_difference * margin_1sthalf + comeback + margin_game")
-all_int_cv_preds <- get_cv_preds("excitement_index ~ score_difference * margin_game + margin_1sthalf + comeback")
+ourvars_cv_preds <- get_cv_preds("excitement_index ~ score_difference * margin_1sthalf + comeback + overtime")
+all_int_cv_preds <- get_cv_preds("excitement_index ~ score_difference * margin_1sthalf + comeback")
 margin_only_cv_preds <- get_cv_preds("excitement_index ~ score_difference + margin_1sthalf")
 ```
 
@@ -219,7 +222,7 @@ bind_rows(mutate(ourvars_minusmargingames_cv_preds, type = "All minus Margin Gam
 ```
 
 ```{r}
-all_lm <- lm(excitement_index ~ comeback + score_difference * margin_1sthalf, data = cfb_model_data_ourvars)
+all_lm <- lm(excitement_index ~ score_difference * margin_1sthalf + comeback + overtime, data = cfb)
 summary(all_lm)
 ```
 
@@ -238,7 +241,80 @@ cfb %>%
 
 Games that were comebacks/went to overtime/were a close game in terms of points were generally more exciting.
 
+
+all_lm <- lm(excitement_index ~ score_difference * margin_1sthalf + comeback + overtime, data = cfb)
+summary(all_lm)
+
+```{r}
+cfb %>%
+  mutate(score_preds = predict(all_lm2)) %>%
+  ggplot(aes(x = score_difference, 
+             color = comeback)) +
+  geom_point(aes(y = score_preds),
+             alpha = 0.5) +
+  theme_bw() +
+  labs(x = "Score Difference", 
+       y = "Predicted Excitement Index",
+       title = "Comeback Games and Close Games are Predicted to be More Exciting") +
+  geom_smooth(aes(y = excitement_index),
+              method = "lm")
+  ggsave("pred_ei_plot_ot.jpeg", width = 8, height = 6)
+```
+
+```{r}
+all_lm_pred <- lm(excitement_index ~ score_difference * margin_1sthalf + comeback + overtime, data = cfb_filt)
+```
+
+```{r}
+cfb_filt <- cfb %>%
+  filter(margin_game >= 0 & margin_game <= 8) %>%
+  mutate(score_preds = predict(all_lm_pred)) %>%
+  ggplot(aes(x = score_difference, 
+             color = overtime)) +
+  geom_point(aes(y = score_preds),
+             alpha = 0.75) +
+  theme_bw() +
+  labs(x = "Score Difference", 
+       y = "Predicted Excitement Index",
+       title = "Overtime Games and Close Games are Predicted to be More Exciting",
+       caption = "Only games where score difference was within one possession") +
+  geom_smooth(aes(y = excitement_index), method = "glm", level = .6)
+  ggsave("pred_ei_plot_ot3.jpeg", width = 8, height = 6)
+cfb_filt
+```
+
 Model diagnostics:
 
+```{r}
+cfb %>%
+  mutate(init_preds = predict(all_lm2)) %>%
+  ggplot(aes(x = excitement_index, y = init_preds)) +
+  geom_point(alpha = 0.75) +
+  geom_abline(slope = 1, intercept = 0,
+              linetype = "dashed", color = "red") +
+  annotate(geom = "text", x = 8, y = 10, label="R-squared: 0.6528") +
+  theme_bw() +
+  labs(x = "Observed Excitement Index", y = "Predicted Excitement Index", title = "Predicted vs. Observed Excitement Index")
+ggsave("pred_vs_obs.jpeg", width = 8, height = 6)
+```
 
+```{r}
+#all_lm <- lm(excitement_index ~ score_difference * margin_1sthalf + comeback + overtime, data = cfb)
+#plot(all_lm)
 
+library(ggfortify)
+testresid <- autoplot(all_lm) +
+  theme_bw()
+ggsave("testresid.jpeg", plot = testresid, width = 8, height = 6)
+```
+
+```{r}
+ggcoef(all_lm, 
+       vline = TRUE,
+       vline_color = "red") + 
+  theme_bw()
+```
+
+```{r}
+vif(all_lm)
+```
